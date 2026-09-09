@@ -9,13 +9,23 @@ PacketHeader PacketManager::createPacketHeader(
     uint64_t payloadSize, 
     uint8_t padding,
     uint32_t crc32, 
-    uint8_t flags) 
+    uint8_t flags,
+    const uint8_t nonce[12])
 {
     PacketHeader header;
     std::memcpy(header.signature, signature, sizeof(signature));
     header.version = 0x01;
     header.flags = flags;
     header.padding = padding;
+
+    // Copy the nonce into the header, ensuring it is 12 bytes long
+    if (nonce) {
+        std::memcpy(header.nonce, nonce, 12);
+    } else {
+        std::memset(header.nonce, 0, 12);
+    }
+
+    std::memcpy(header.nonce, nonce, sizeof(header.nonce));
 
     // Copy the file extension into the header, ensuring it is null-terminated
     std::memset(header.file_ext, 0, sizeof(header.file_ext)); // Initialize with null characters

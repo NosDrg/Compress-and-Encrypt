@@ -13,6 +13,7 @@ struct PacketHeader {
     uint8_t version;        // Version of the packet format
     uint8_t flags;          // Bit 0: Hufman (1=0n), Bit 1: Encrypted (0=None, 1=AES)
     uint8_t padding;        // Padding byte for alignment
+    uint8_t nonce[12];      // Nonce for encryption
     char file_ext[8];       // File extension e.g., ".txt", ".jpg" (end by '\0' if shorter than 8 characters)
     uint64_t original_size; // Original size of the file before compression
     uint64_t payload_size;  // Size of the payload (compressed data) in bytes
@@ -32,7 +33,8 @@ public:
          uint64_t payloadSize, 
          uint8_t padding,
          uint32_t crc32, 
-         uint8_t flags = 0x01 // Default to Huffman compression enabled);
+         uint8_t flags = 0x01,
+         const uint8_t nonce[12] = nullptr // Default to no nonce
     );
 
     // Method to write the packet header to an output stream
