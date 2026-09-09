@@ -1,8 +1,8 @@
-#include "compressedData.hpp"
+#include "Huffman.hpp"
 #include <queue>
 #include <array>
 
-CompressedData* CompressedDataHandler::buildHuffmanTree(const std::vector<uint8_t>& inputData) {
+HuffmanNode* HuffmanHandler::buildHuffmanTree(const std::vector<uint8_t>& inputData) {
     // Count the frequency of each character in the input data
     std::array<uint64_t, 256> frequencyMap = {0}    ;
     for (uint8_t byte : inputData) {
@@ -10,24 +10,24 @@ CompressedData* CompressedDataHandler::buildHuffmanTree(const std::vector<uint8_
     }
 
     // Create a priority queue (min-heap) to build the Huffman tree
-    std::priority_queue<CompressedData*, std::vector<CompressedData*>, NodeComparator> minHeap;
+    std::priority_queue<HuffmanNode*, std::vector<HuffmanNode*>, NodeComparator> minHeap;
 
     // Create leaf nodes for each character and add them to the priority queue
     for (int i = 0; i < 256; ++i) {
         if (frequencyMap[i] > 0) {
-            minHeap.push(new CompressedData(i, frequencyMap[i]));
+            minHeap.push(new HuffmanNode(i, frequencyMap[i]));
         }
     }
 
     // Build the Huffman tree by combining nodes with the lowest frequencies
     while (minHeap.size() > 1) {
-        CompressedData* left = minHeap.top();
+        HuffmanNode* left = minHeap.top();
         minHeap.pop();
-        CompressedData* right = minHeap.top();
+        HuffmanNode* right = minHeap.top();
         minHeap.pop();
 
         uint64_t combinedFreq = left->freq + right->freq;
-        CompressedData* internalNode = new CompressedData(combinedFreq, left, right);
+        HuffmanNode* internalNode = new HuffmanNode(combinedFreq, left, right);
         minHeap.push(internalNode);
     }
 
@@ -35,7 +35,7 @@ CompressedData* CompressedDataHandler::buildHuffmanTree(const std::vector<uint8_
     return minHeap.top();
 }
 
-void CompressedDataHandler::generateHuffmanCodes(CompressedData* root, const std::string& code, std::string code_table[256]) {
+void HuffmanHandler::generateHuffmanCodes(HuffmanNode* root, const std::string& code, std::string code_table[256]) {
     if (!root) return;
 
     // If the current node is a leaf node, store the code for the character
@@ -51,7 +51,7 @@ void CompressedDataHandler::generateHuffmanCodes(CompressedData* root, const std
     generateHuffmanCodes(root->right, code + "1", code_table);
 }
 
-void CompressedDataHandler::writeCompressedData(const CompressedData* root, BitWriter& bitWriter) {
+void HuffmanHandler::writeCompressedData(const HuffmanNode* root, BitWriter& bitWriter) {
     if (!root) return;
 
     // If the current node is a leaf node, write a '1' bit followed by the character
@@ -67,7 +67,7 @@ void CompressedDataHandler::writeCompressedData(const CompressedData* root, BitW
     writeCompressedData(root->right, bitWriter);
 }
 
-CompressedData* CompressedDataHandler::readCompressedData(BitReader& bitReader) {
+HuffmanNode* HuffmanHandler::readCompressedData(BitReader& bitReader) {
     // Read a single bit to determine if the current node is a leaf or internal node
     int bit = bitReader.readBit();
     if (bit == -1) {
@@ -82,16 +82,16 @@ CompressedData* CompressedDataHandler::readCompressedData(BitReader& bitReader) 
             std::cerr << "Error: Unexpected end of stream while reading character." << std::endl;
             return nullptr; // Return nullptr to indicate an error
         }
-        return new CompressedData(character, 0); // Frequency is not needed for decompression
+        return new HuffmanNode(character, 0); // Frequency is not needed for decompression
     }
 
     // If the bit is '0', recursively read the left and right children to create an internal node
-    CompressedData* leftChild = readCompressedData(bitReader);
-    CompressedData* rightChild = readCompressedData(bitReader);
-    return new CompressedData(0, leftChild, rightChild); // Frequency is not needed for decompression
+    HuffmanNode* leftChild = readCompressedData(bitReader);
+    HuffmanNode* rightChild = readCompressedData(bitReader);
+    return new HuffmanNode(0, leftChild, rightChild); // Frequency is not needed for decompression
 }
 
-void CompressedDataHandler::deleteHuffmanTree(CompressedData* root) {
+void HuffmanHandler::deleteHuffmanTree(HuffmanNode* root) {
     if (!root) return;
 
     // Recursively delete the left and right subtrees
@@ -102,9 +102,9 @@ void CompressedDataHandler::deleteHuffmanTree(CompressedData* root) {
     delete root;
 }
 
-uint8_t CompressedDataHandler::compressData(const std::vector<uint8_t>& inputData, std::ostream& outputStream) {
+uint8_t HuffmanHandler::compressData(const std::vector<uint8_t>& inputData, std::ostream& outputStream) {
     // Build the Huffman tree based on the input data
-    CompressedData* root = buildHuffmanTree(inputData);
+    HuffmanNode* root = buildHuffmanTree(inputData);
 
     // Generate Huffman codes for each character
     std::string code_table[256];
@@ -133,7 +133,7 @@ uint8_t CompressedDataHandler::compressData(const std::vector<uint8_t>& inputDat
     return remainingBits; // Return the number of remaining bits in the last byte
 }
 
-std::vector<uint8_t> CompressedDataHandler::decompressData(std::istream& inputStream, uint64_t originalSize) {
+std::vector<uint8_t> HuffmanHandler::decompressData(std::istream& inputStream, uint64_t originalSize) {
     std::vector<uint8_t> outputData; // Vector to hold the decompressed data
     if (originalSize == 0) {
         return outputData; // Return an empty vector if the original size is zero
@@ -142,7 +142,7 @@ std::vector<uint8_t> CompressedDataHandler::decompressData(std::istream& inputSt
     outputData.reserve(originalSize); // Reserve space for the original size to avoid reallocations
     BitReader bitReader(inputStream); // Create a BitReader to read bits from the input stream
 
-    CompressedData* root = readCompressedData(bitReader); // Read the Huffman tree structure from the input stream
+    HuffmanNode* root = readCompressedData(bitReader); // Read the Huffman tree structure from the input stream
     if (!root) {
         throw std::runtime_error("Failed to read Huffman tree from the input stream.");
     }
@@ -154,7 +154,7 @@ std::vector<uint8_t> CompressedDataHandler::decompressData(std::istream& inputSt
     }
 
     // Read bits from the input stream and traverse the Huffman tree to decode characters
-    CompressedData* currentNode = root; // Start at the root of the Huffman tree
+    HuffmanNode* currentNode = root; // Start at the root of the Huffman tree
     while (outputData.size() < originalSize) {
         int bit = bitReader.readBit();
         if (bit == -1) {
