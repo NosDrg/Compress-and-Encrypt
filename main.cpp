@@ -9,7 +9,7 @@
 #include <cstdlib>
 #include <algorithm>
 
-#include "compress/HuffmanAdapter.hpp"
+#include "compress/ZstdAdapter.hpp"
 #include "crypto/ChaCha20Adapter.hpp"
 #include "pack/packet.hpp"
 #include "pack/CRC32.hpp"
@@ -332,7 +332,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Instantiate compression and encryption adapters via abstraction interfaces
-    std::unique_ptr<ICompressor> huffmanCompressor = std::make_unique<HuffmanAdapter>();
+    std::unique_ptr<ICompressor> huffmanCompressor = std::make_unique<ZstdAdapter>();
     std::unique_ptr<ICipher> chacha20Cipher = std::make_unique<ChaCha20Adapter>();
 
     if (mode == "-c") {
