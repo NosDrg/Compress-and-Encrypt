@@ -1,7 +1,7 @@
 # Secure File Packaging Prototype
 
 A small C++17 command-line tool for preparing files for transmission. The
-program compresses the input with Huffman coding, encrypts the compressed
+program compresses the input with Zstd coding, encrypts the compressed
 payload with ChaCha20, stores it in a versioned binary packet, and verifies the
 restored data with CRC32.
 
@@ -13,7 +13,7 @@ restored data with CRC32.
 ## Features
 
 - Binary file input and output
-- Huffman compression
+- Zstd compression
 - ChaCha20 encryption with a 32-byte key
 - Random 12-byte nonce stored in each packet
 - Packet header containing:
@@ -33,7 +33,7 @@ restored data with CRC32.
 ```text
 input file
 	-> read bytes
-	-> Huffman compression
+	-> Zstd compression
 	-> ChaCha20 encryption
 	-> CRC32 checksum
 	-> packet header + encrypted payload
@@ -47,7 +47,7 @@ input file
 	-> validate packet signature and version
 	-> read packet header and encrypted payload
 	-> ChaCha20 decryption
-	-> Huffman decompression
+	-> Zstd decompression
 	-> verify CRC32
 	-> restored file
 ```
@@ -55,20 +55,20 @@ input file
 ## Build
 
 The project uses standard C++17 library features and has no third-party
-dependencies. Compile `main.cpp`, `compress/Huffman.cpp`, and
+dependencies. Compile `main.cpp`, and
 `pack/packet.cpp` with a C++17 compiler. The remaining components are
 header-only.
 
 ### Windows with MinGW
 
 ```powershell
-g++ -std=c++17 -O2 main.cpp compress/Huffman.cpp pack/packet.cpp -o secpack.exe
+g++ -std=c++17 -O2 main.cpp pack/packet.cpp -o secpack.exe
 ```
 
 ### Linux or macOS
 
 ```bash
-g++ -std=c++17 -O2 main.cpp compress/Huffman.cpp pack/packet.cpp -o secpack
+g++ -std=c++17 -O2 main.cpp pack/packet.cpp -o secpack
 ```
 
 ## Encryption Key
@@ -131,7 +131,7 @@ payload. The header contains:
 
 - `DRGO` signature and format version `1`
 - flags: bit 0 for Huffman compression and bit 1 for ChaCha20 encryption
-- Huffman padding count
+- Zstd algorithm
 - 12-byte ChaCha20 nonce
 - original file extension (up to 7 characters)
 - original file size and encrypted payload size
@@ -152,9 +152,7 @@ the original bytes.
 .
 ├── main.cpp                    # CLI, key loading, and processing pipelines
 ├── compress/
-	├── Huffman.cpp                # Huffman encoder and decoder
-	├── Huffman.hpp
-	├── HuffmanAdapter.hpp
+	├── ZstdAdapter.hpp
 	├── ICompressor.hpp
 	├── bitReader.hpp
 	└── bitWriter.hpp
