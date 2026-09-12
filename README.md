@@ -1,21 +1,26 @@
 # Secure File Packaging Prototype
 
-A small C++17 command-line tool for preparing files for transmission. The
-program compresses the input with Zstd coding, encrypts the compressed
-payload with ChaCha20, stores it in a versioned binary packet, and verifies the
-restored data with CRC32.
+A C++17 command-line tool for compressing, encrypting, and restoring binary
+files. The default pipeline uses Zstd compression followed by a cascade of
+AES-256-GCM and ChaCha20-Poly1305 encryption. The result is stored in a
+versioned binary packet with a nonce, authentication tag, file metadata, and a
+CRC32 checksum.
 
-> **Security status:** the project currently uses ChaCha20 without an
-> authentication tag. CRC32 detects some accidental corruption, but it is not
-> cryptographic authentication and does not prevent intentional tampering. Do
-> not rely on this format for confidential or adversarial environments.
+> **Security status:** this is a prototype. The cascade currently stores one
+> 16-byte tag created by XORing the AES-GCM and ChaCha20-Poly1305 tags. During
+> decryption, the same stored tag is supplied to both layers. Review and test
+> this design before relying on the format for confidential or adversarial
+> environments. CRC32 is an additional corruption check, not a replacement for
+> cryptographic authentication.
 
 ## Features
 
 - Binary file input and output
 - Zstd compression
-- ChaCha20 encryption with a 32-byte key
+- AES-256-GCM followed by ChaCha20-Poly1305 encryption
+- A 32-byte master key split into independent AES and ChaCha20 subkeys
 - Random 12-byte nonce stored in each packet
+- 16-byte authentication tag stored in the packet header
 - Packet header containing:
   - packet signature and format version
   - original and compressed sizes
@@ -34,7 +39,8 @@ restored data with CRC32.
 input file
 	-> read bytes
 	-> Zstd compression
-	-> ChaCha20 encryption
+	-> AES-256-GCM encryption
+	-> ChaCha20-Poly1305 encryption
 	-> CRC32 checksum
 	-> packet header + encrypted payload
 	-> .sec file
@@ -46,7 +52,8 @@ input file
 .sec file
 	-> validate packet signature and version
 	-> read packet header and encrypted payload
-	-> ChaCha20 decryption
+	-> ChaCha20-Poly1305 authentication and decryption
+	-> AES-256-GCM authentication and decryption
 	-> Zstd decompression
 	-> verify CRC32
 	-> restored file
@@ -54,21 +61,20 @@ input file
 
 ## Build
 
-The project uses standard C++17 library features and has no third-party
-dependencies. Compile `main.cpp`, and
-`pack/packet.cpp` with a C++17 compiler. The remaining components are
-header-only.
+The project requires a C++17 compiler, Zstandard (`libzstd` and `zstd.h`),
+and OpenSSL (`libcrypto` and `openssl/evp.h`). Compile `main.cpp` and
+`pack/packet.cpp`; the other project components are header-only.
 
 ### Windows with MinGW
 
 ```powershell
-g++ -std=c++17 -O2 main.cpp pack/packet.cpp -o secpack.exe
+g++ -std=c++17 -O2 main.cpp pack/packet.cpp -lzstd -lcrypto -o secpack.exe
 ```
 
 ### Linux or macOS
 
 ```bash
-g++ -std=c++17 -O2 main.cpp pack/packet.cpp -o secpack
+g++ -std=c++17 -O2 main.cpp pack/packet.cpp -lzstd -lcrypto -o secpack
 ```
 
 ## Encryption Key
@@ -118,7 +124,7 @@ Example:
 secpack -d image.sec image.jpg
 ```
 
-The output path is optional. If it is omitted, the decoder creates a file named
+The output path is optional. If it is omitted, the decoder creates
 `<packet-base-name>_decompressed<stored-extension>` in the current directory.
 
 The program returns exit code `0` on success and `1` when the key, input,
@@ -126,16 +132,17 @@ packet, or processing step is invalid.
 
 ## Packet Format
 
-Each packet consists of a packed 47-byte header followed by the encrypted
+Each packet consists of a packed 63-byte header followed by the encrypted
 payload. The header contains:
 
 - `DRGO` signature and format version `1`
-- flags: bit 0 for Huffman compression and bit 1 for ChaCha20 encryption
-- Zstd algorithm
-- 12-byte ChaCha20 nonce
-- original file extension (up to 7 characters)
-- original file size and encrypted payload size
-- CRC32 of the original, restored data
+- flags (`0x03` is used by the CLI for compression and encryption)
+- one padding byte reserved by the compressor interface
+- 12-byte encryption nonce
+- 16-byte authentication tag
+- original file extension in an 8-byte field, including the terminator
+- original file size and encrypted payload size as `uint64_t`
+- CRC32 of the original restored data
 
 The processing order is:
 
@@ -152,13 +159,15 @@ the original bytes.
 .
 ├── main.cpp                    # CLI, key loading, and processing pipelines
 ├── compress/
-	├── ZstdAdapter.hpp
+	├── ZstdAdapter.hpp         # Zstd compression
 	├── ICompressor.hpp
 	├── bitReader.hpp
 	└── bitWriter.hpp
 ├── crypto/
+	├── AES256Adapter.hpp          # AES-256-GCM
 	├── ChaCha20.hpp               # ChaCha20 implementation
-	├── ChaCha20Adapter.hpp
+	├── ChaCha20Adapter.hpp        # ChaCha20-Poly1305
+	├── CascadeCipherAdapter.hpp
 	├── ICipher.hpp
 	└── cryptoEngine.hpp
 └── pack/
@@ -169,7 +178,8 @@ the original bytes.
 
 ## Limitations
 
-- ChaCha20 encryption is implemented, but authentication is not.
+- The cascade tag format needs security review because one XOR-combined tag is
+	used for two independent AEAD layers.
 - CRC32 is not a cryptographic integrity mechanism.
 - The complete input file is loaded into memory.
 - Empty input files are rejected.
@@ -189,4 +199,4 @@ Get-FileHash sample.txt
 Get-FileHash restored.txt
 ```
 
-The two hashes should be identical.
+The two hashes should be identical when encryption authentication succeeds.

@@ -35,7 +35,8 @@ public:
          uint8_t padding,
          uint32_t crc32, 
          uint8_t flags = 0x01,
-         const uint8_t nonce[12] = nullptr // Default to no nonce
+         const uint8_t nonce[12] = nullptr, // Default to no nonce
+         const uint8_t tag[16]
     );
 
     // Method to write the packet header to an output stream

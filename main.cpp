@@ -10,7 +10,7 @@
 #include <algorithm>
 
 #include "compress/ZstdAdapter.hpp"
-#include "crypto/ChaCha20Adapter.hpp"
+#include "crypto/CascadeCipherAdapter.hpp"
 #include "pack/packet.hpp"
 #include "pack/CRC32.hpp"
 
@@ -136,19 +136,27 @@ bool compressDataStep(ICompressor* compressor, const std::vector<uint8_t>& rawDa
     return compressor->compress(rawData, compressedData, padding);
 }
 
-// Step 2: Encrypt compressed payload using ChaCha20 stream cipher
-bool encryptPayloadStep(ICipher* cipher, const std::vector<uint8_t>& compressedData, 
-                        const std::array<uint8_t, 32>& key, std::array<uint8_t, 12>& nonce, 
-                        std::vector<uint8_t>& encryptedData) {
+// Step 2: Encrypt compressed payload using AEAD cipher (ChaCha20-Poly1305 / AES-256-GCM)
+bool encryptPayloadStep(ICipher* cipher, 
+                        const std::vector<uint8_t>& compressedData, 
+                        const std::array<uint8_t, 32>& key, 
+                        std::array<uint8_t, 12>& nonce, 
+                        std::vector<uint8_t>& encryptedData,
+                        std::array<uint8_t, 16>& outTag) 
+{
     cipher->generateNonce(nonce);
-    return cipher->encrypt(compressedData, key, nonce, encryptedData);
+    return cipher->encrypt(compressedData, key, nonce, encryptedData, outTag);
 }
 
-// Step 3: Decrypt encrypted payload back to compressed data
-bool decryptPayloadStep(ICipher* cipher, const std::vector<uint8_t>& encryptedData, 
-                        const std::array<uint8_t, 32>& key, std::array<uint8_t, 12>& nonce, 
-                        std::vector<uint8_t>& decryptedData) {
-    return cipher->decrypt(encryptedData, key, nonce, decryptedData);
+// Step 3: Decrypt encrypted payload back to compressed data after verifying Auth Tag
+bool decryptPayloadStep(ICipher* cipher, 
+                        const std::vector<uint8_t>& encryptedData, 
+                        const std::array<uint8_t, 32>& key, 
+                        const std::array<uint8_t, 12>& nonce, 
+                        const std::array<uint8_t, 16>& expectedTag,
+                        std::vector<uint8_t>& decryptedData) 
+{
+    return cipher->decrypt(encryptedData, key, nonce, expectedTag, decryptedData);
 }
 
 // Step 4: Decompress data back to original content
@@ -186,10 +194,11 @@ bool compressAndPackageFile(const std::string& inputFilePath, const std::string&
         return false;
     }
 
-    // Encrypt the compressed data using ChaCha20
+    // Encrypt the compressed data using PolyChaCha20 + AES256
     std::array<uint8_t, 12> nonce;
     std::vector<uint8_t> encryptedPayload;
-    if (!encryptPayloadStep(cipher, compressedData, key, nonce, encryptedPayload)) {
+    std::array<uint8_t,16> tag;
+    if (!encryptPayloadStep(cipher, compressedData, key, nonce, encryptedPayload, tag)) {
         std::cerr << "Encryption failed for file: " << inputFilePath << std::endl;
         return false;
     }
@@ -205,7 +214,8 @@ bool compressAndPackageFile(const std::string& inputFilePath, const std::string&
         remainingBits,
         originalCrc32,
         0x03, // Flags: 0x01 (Huffman) | 0x02 (ChaCha20)
-        nonce.data()
+        nonce.data(),
+        tag.data()
     );
 
     // Write the packet header and compressed data to the output file
@@ -264,12 +274,14 @@ bool decompressAndUnpackageFile(const std::string& inputFilePath, std::string ou
         return false; // Error reading the compressed data
     }
 
-    // Decrypt the payload using ChaCha20
+    // Decrypt the payload using PolyChaCha20 + AES256
     std::vector<uint8_t> compressedData;
     std::array<uint8_t, 12> nonce;
+    std::array<uint8_t, 16> tag;
+    std::copy(std::begin(header.tag), std::end(header.tag), tag.begin());
     std::copy(std::begin(header.nonce), std::end(header.nonce), nonce.begin());
-    if (!decryptPayloadStep(cipher, encryptedPayload, key, nonce, compressedData)) {
-        std::cerr << "Decryption failed for file: " << inputFilePath << std::endl;
+    if (!decryptPayloadStep(cipher, encryptedPayload, key, nonce, tag, compressedData)) {
+        std::cerr << "Decryption failed or Auth Tag mismatch for file: " << inputFilePath << std::endl;
         return false;
     }
 
@@ -320,43 +332,43 @@ void printUsage(const char* programName) {
 int main(int argc, char* argv[]) {
     if (argc < 3) {
         printUsage(argv[0]);
-        return 1; // Invalid number of arguments
+        return 1;
     }
 
     std::string mode = argv[1];
 
-    // Load encryption key from environment variable
+    // Load 32-byte secret key from .env file or environment variable
     std::array<uint8_t, 32> secretKey;
     if (!loadKeyFromEnv(secretKey)) {
         return 1;
     }
 
-    // Instantiate compression and encryption adapters via abstraction interfaces
-    std::unique_ptr<ICompressor> huffmanCompressor = std::make_unique<ZstdAdapter>();
-    std::unique_ptr<ICipher> chacha20Cipher = std::make_unique<ChaCha20Adapter>();
+    // Default adapters: Zstd for compression, ChaCha20-Poly1305 + Aes256 for encryption
+    std::unique_ptr<ICompressor> compressor = std::make_unique<ZstdAdapter>(3);
+    std::unique_ptr<ICipher> cipher = std::make_unique<CascadeCipherAdapter>();
 
     if (mode == "-c") {
         if (argc < 4) {
             std::cerr << "Error: Missing input or output file argument." << std::endl;
             printUsage(argv[0]);
-            return 1; // Invalid number of arguments for the specified mode
+            return 1;
         }
         
-        return compressAndPackageFile(argv[2], argv[3], secretKey, huffmanCompressor.get(), chacha20Cipher.get()) ? 0 : 1; // Compress and package
-    } else if (mode == "-d") {
-        // Output file argument is optional; empty string triggers auto-generation
+        return compressAndPackageFile(argv[2], argv[3], secretKey, compressor.get(), cipher.get()) ? 0 : 1;
+    } 
+    else if (mode == "-d") {
         std::string outputFilePath = (argc >= 4) ? argv[3] : "";
 
-        // Decompress and unpackage the file
-        if (!decompressAndUnpackageFile(argv[2], outputFilePath, secretKey, huffmanCompressor.get(), chacha20Cipher.get())) {
+        if (!decompressAndUnpackageFile(argv[2], outputFilePath, secretKey, compressor.get(), cipher.get())) {
             std::cerr << "Decompression and unpackaging failed." << std::endl;
-            return 1; // Error during decompression
+            return 1;
         }
-    } else {
+    } 
+    else {
         std::cerr << "Error: Invalid mode specified. Use -c for compress or -d for decompress." << std::endl;
         printUsage(argv[0]);
-        return 1; // Invalid mode specified
+        return 1;
     }
 
-    return 0; // Success
+    return 0;
 }

@@ -10,7 +10,9 @@ PacketHeader PacketManager::createPacketHeader(
     uint8_t padding,
     uint32_t crc32, 
     uint8_t flags,
-    const uint8_t nonce[12])
+    const uint8_t nonce[12],
+    const uint8_t tag[16]
+)
 {
     PacketHeader header;
     std::memcpy(header.signature, signature, sizeof(signature));
