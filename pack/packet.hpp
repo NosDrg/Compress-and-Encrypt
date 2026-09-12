@@ -14,6 +14,7 @@ struct PacketHeader {
     uint8_t flags;          // Bit 0: Hufman (1=0n), Bit 1: Encrypted (0=None, 1=AES)
     uint8_t padding;        // Padding byte for alignment
     uint8_t nonce[12];      // Nonce for encryption
+    uint8_t  tag[16];       // Poly1305 Auth Tag(AEAD)
     char file_ext[8];       // File extension e.g., ".txt", ".jpg" (end by '\0' if shorter than 8 characters)
     uint64_t original_size; // Original size of the file before compression
     uint64_t payload_size;  // Size of the payload (compressed data) in bytes

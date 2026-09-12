@@ -12,10 +12,12 @@ public:
     virtual bool encrypt(const std::vector<uint8_t>& input,
                          const std::array<uint8_t, 32>& key,
                          const std::array<uint8_t, 12>& nonce,
-                         std::vector<uint8_t>& output) = 0;
+                         std::vector<uint8_t>& output,
+                         std::array<uint8_t, 16>& outTag) = 0;
     virtual bool decrypt(const std::vector<uint8_t>& input,
                          const std::array<uint8_t, 32>& key,
                          const std::array<uint8_t, 12>& nonce,
+                         const std::array<uint8_t, 16>& expectedTag,
                          std::vector<uint8_t>& output) = 0;
 };
 
